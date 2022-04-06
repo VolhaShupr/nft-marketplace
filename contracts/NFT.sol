@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract NFT is ERC721URIStorage, AccessControl {
+contract ERC721Token is ERC721URIStorage, AccessControl {
 
     bytes32 private constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
@@ -29,6 +29,5 @@ contract NFT is ERC721URIStorage, AccessControl {
     function supportsInterface(bytes4 interfaceId) public view override(ERC721, AccessControl) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
-
 
 }
