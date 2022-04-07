@@ -6,10 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "./NFT.sol";
-
-// import "hardhat/console.sol";
-// console.log("Changing greeting from '%s' to '%s'", greeting, _greeting);
+import "./ERC721Token.sol";
 
 contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
 
@@ -50,7 +47,7 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         _paymentToken = IERC20(ERC20Token);
     }
 
-    function createItem(string memory tokenURI, address to) external onlyOwner {
+    function createItem(string memory tokenURI, address to) external {
         uint tokenId = _nft.safeMint(to, tokenURI);
 
         emit CreateItem(tokenId, to, tokenURI);
@@ -119,11 +116,11 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
             _paymentToken.safeTransfer(item.latestBidder, item.latestPrice); // return frozen bid
         }
 
+        _paymentToken.safeTransferFrom(msg.sender, address(this), price);
+
         item.latestPrice = price;
         item.latestBidder = msg.sender;
         item.participantsCount++;
-
-        _paymentToken.safeTransferFrom(msg.sender, address(this), price);
 
         emit MakeBid(tokenId, msg.sender, price);
     }
