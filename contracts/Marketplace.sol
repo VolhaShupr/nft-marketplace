@@ -1,7 +1,6 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -20,7 +19,8 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         uint price;
     }
 
-    mapping (uint => MarketItem) private _listedItems; // nftId => MarketItem
+    /// @dev nftId => MarketItem
+    mapping (uint => MarketItem) private _listedItems;
 
     struct AuctionItem {
         address owner;
@@ -30,29 +30,93 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         uint participantsCount;
     }
 
-    mapping (uint => AuctionItem) private _auctionItems; // nftId => AuctionItem
+    /// @dev nftId => AuctionItem
+    mapping (uint => AuctionItem) private _auctionItems;
 
     uint public auctionPeriod = 3 days;
+
+    /// @dev condition for the 'successful' ending of the auction
     uint public auctionMinParticipantsCount = 2;
 
+    /**
+    * @dev Emitted when user creates nft item
+    * @param tokenId Id of the created item
+    * @param owner address of the created item
+    * @param tokenURI Item metadata URI
+    */
     event CreateItem(uint indexed tokenId, address indexed owner, string tokenURI);
+
+    /**
+    * @dev Emitted when item owner changes listing status of the nft (lists for sale or cancels listing)
+    * @param tokenId Id of the listed item
+    * @param price Price of the listed item. value 0 - in case of cancelling
+    * @param listed Whether item was listed for sale or listing was cancelled
+    */
     event ListItem(uint indexed tokenId, uint price, bool listed);
+
+    /**
+    * @dev Emitted when user buys nft item
+    * @param tokenId Purchased item id
+    * @param newOwner User address that bought the item
+    * @param price Purchase price
+    */
     event BuyItem(uint indexed tokenId, address indexed newOwner, uint price);
+
+    /**
+    * @dev Emitted when item owner lists nft on auction
+    * @param tokenId Id of the created item
+    * @param minPrice Start price of the item
+    */
     event ListItemOnAuction(uint indexed tokenId, uint minPrice);
+
+    /**
+    * @dev Emitted when user makes a bid
+    * @param tokenId Id of the item on auction
+    * @param bidder Bidder address
+    * @param price Bid price
+    */
     event MakeBid(uint indexed tokenId, address bidder, uint price);
+
+    /**
+    * @dev Emitted when item owner finishes the auction
+    * @param tokenId Id of the created item
+    * @param newOwner User address that receives the item (depends on amount of bids)
+    * @param price Final price. Value 0 - in case of 'unsuccessful' finishing the auction when item returns to the initial owner
+    */
     event FinishAuction(uint indexed tokenId, address indexed newOwner, uint price);
 
+    /**
+     * @dev Initializes the contract by setting a `nft` and a `ERC20Token`
+     */
     constructor(address nft, address ERC20Token) {
         _nft = ERC721Token(nft);
         _paymentToken = IERC20(ERC20Token);
     }
 
+    /**
+    * @dev Mints nft item to the specified address
+    * @param tokenURI New item metadata URI
+    * @param to Address of the new item recipient
+    *
+    * Emits a {CreateItem} event
+    */
     function createItem(string memory tokenURI, address to) external {
         uint tokenId = _nft.safeMint(to, tokenURI);
 
         emit CreateItem(tokenId, to, tokenURI);
     }
 
+    /**
+    * @dev Lists for sale nft item
+    * @param tokenId Id of the item to list
+    * @param price Price of the item to list
+    *
+    * Requirements:
+    * - `price` cannot be the zero
+    * - Item should not be already listed
+    *
+    * Emits a {ListItem} event
+    */
     function listItem(uint tokenId, uint price) external {
         require(price > 0, "Not valid price");
 
@@ -67,6 +131,16 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         emit ListItem(tokenId, price, true);
     }
 
+
+    /**
+    * @dev Cancels item listing
+    * @param tokenId Id of the item to cancel
+    *
+    * Requirements:
+    * - `msg.sender` should be item owner
+    *
+    * Emits a {ListItem} event
+    */
     function cancel(uint tokenId) external {
         require(_listedItems[tokenId].owner == msg.sender, "Not permitted");
 
@@ -76,6 +150,16 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         delete _listedItems[tokenId];
     }
 
+    /**
+    * @dev Transfers item to the buyer's address (`msg.sender`)
+    * @param tokenId Id of the item to cancel
+    *
+    * Requirements:
+    * - Item should be already listed
+    * - `msg.sender` (buyer) should be not the same address that item owner (seller)
+    *
+    * Emits a {BuyItem} event
+    */
     function buyItem(uint tokenId) external {
         MarketItem memory item = _listedItems[tokenId];
 
@@ -89,6 +173,17 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         delete _listedItems[tokenId];
     }
 
+    /**
+    * @dev Lists nft item on the auction
+    * @param tokenId Id of the item to list
+    * @param minPrice Start price of the item to list
+    *
+    * Requirements:
+    * - `minPrice` cannot be the zero
+    * - Item should not be already listed on the auction
+    *
+    * Emits a {ListItemOnAuction} event
+    */
     function listItemOnAuction(uint tokenId, uint minPrice) external {
         require(minPrice > 0, "Not valid price");
 
@@ -105,6 +200,18 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         emit ListItemOnAuction(tokenId, minPrice);
     }
 
+    /**
+    * @dev Updates the latest price and the latest bidder for the item on auction
+    * @param tokenId Id of the item on auction
+    * @param price Bid price
+    *
+    * Requirements:
+    * - Item should be already listed on the auction
+    * - Auction should be in process
+    * - `price` should be greater than previous bid or min price
+    *
+    * Emits a {MakeBid} event
+    */
     function makeBid(uint tokenId, uint price) external nonReentrant {
         AuctionItem storage item = _auctionItems[tokenId];
 
@@ -125,6 +232,20 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         emit MakeBid(tokenId, msg.sender, price);
     }
 
+    /**
+    * @dev Finishes the auction and transfers item to the winner
+    * @param tokenId Id of the item on auction
+    *
+    * Requirements:
+    * - Item should be already listed on the auction
+    * - Auction should be ended (auction period should pass)
+    *
+    * 'Unsuccessful' finishing the auction is when the amount of participants is less than value specified in `auctionMinParticipantsCount`
+    * In case of 'unsuccessful' finishing the auction item returns to the initial owner,
+    * otherwise to the latest bidder
+    *
+    * Emits a {FinishAuction} event
+    */
     function finishAuction(uint tokenId) external nonReentrant {
         AuctionItem memory item = _auctionItems[tokenId];
 
@@ -154,10 +275,18 @@ contract Marketplace is ERC721Holder, ReentrancyGuard, Ownable {
         delete _auctionItems[tokenId];
     }
 
+    /**
+    * @dev Sets a new value of the minimum participants number
+    * @param newAuctionMinParticipantsCount Minimum number of participants
+    */
     function updateAuctionMinParticipants(uint newAuctionMinParticipantsCount) external onlyOwner {
         auctionMinParticipantsCount = newAuctionMinParticipantsCount;
     }
 
+    /**
+    * @dev Sets a new value of the auction period
+    * @param newAuctionPeriod New auction period (in sec)
+    */
     function updateAuctionPeriod(uint newAuctionPeriod) external onlyOwner {
         auctionPeriod = newAuctionPeriod;
     }
